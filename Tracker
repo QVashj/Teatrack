@@ -1,0 +1,181 @@
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+
+export default function CryptoPortfolioSimulator() {
+  const [walletId, setWalletId] = useState('');
+  const [portfolio, setPortfolio] = useState(null);
+  const [coin, setCoin] = useState('bitcoin');
+  const [amount, setAmount] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [prices, setPrices] = useState({});
+  const [profit, setProfit] = useState(0);
+
+  useEffect(() => {
+    if (!walletId) return;
+
+    const interval = setInterval(() => {
+      Object.keys(portfolio?.holdings || {}).forEach(async (key) => {
+        const price = await fetchPrice(key);
+        setPrices((prev) => ({ ...prev, [key]: price }));
+      });
+    }, 10000);
+
+    return () => clearInterval(interval);
+  }, [walletId, portfolio]);
+
+  useEffect(() => {
+    if (!portfolio || !portfolio.holdings) return;
+    let total = 0;
+    Object.entries(portfolio.holdings).forEach(([key, qty]) => {
+      const currentPrice = prices[key];
+      if (currentPrice) {
+        total += qty * currentPrice;
+      }
+    });
+    const totalValue = total + (portfolio?.usd || 0);
+    const profitPct = ((totalValue - 10000) / 10000) * 100;
+    setProfit(profitPct);
+  }, [prices, portfolio]);
+
+  const createWallet = () => {
+    const id = Math.random().toString(36).substring(2);
+    setWalletId(id);
+    setPortfolio({ usd: 10000, holdings: {} });
+  };
+
+  const fetchPrice = async (coinId) => {
+    try {
+      const response = await axios.get(
+        `https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd`
+      );
+      return response.data[coinId]?.usd;
+    } catch (err) {
+      console.error('Failed to fetch price:', err);
+      return null;
+    }
+  };
+
+  const handleTransaction = async (type) => {
+    if (!walletId || !amount) {
+      alert('Please enter a valid amount and ensure you have a wallet.');
+      return;
+    }
+    setLoading(true);
+    const price = await fetchPrice(coin);
+    if (!price) {
+      setLoading(false);
+      return;
+    }
+
+    const amt = parseFloat(amount);
+    if (isNaN(amt) || amt <= 0) {
+      alert('Amount must be a positive number.');
+      setLoading(false);
+      return;
+    }
+
+    const qty = amt / price;
+    setPortfolio((prev) => {
+      if (!prev) return prev;
+
+      if (type === 'buy') {
+        if (prev.usd < amt) {
+          alert('Insufficient funds');
+          return prev;
+        }
+        return {
+          usd: prev.usd - amt,
+          holdings: {
+            ...prev.holdings,
+            [coin]: (prev.holdings[coin] || 0) + qty,
+          },
+        };
+      }
+
+      if (type === 'sell') {
+        if ((prev.holdings[coin] || 0) < qty) {
+          alert('Not enough coin to sell');
+          return prev;
+        }
+        return {
+          usd: prev.usd + amt,
+          holdings: {
+            ...prev.holdings,
+            [coin]: prev.holdings[coin] - qty,
+          },
+        };
+      }
+
+      return prev;
+    });
+    setLoading(false);
+  };
+
+  return (
+    <div className="p-4 max-w-lg mx-auto">
+      <h1 className="text-2xl font-bold mb-4">Crypto Paper Trading Simulator</h1>
+      {!walletId ? (
+        <button
+          onClick={createWallet}
+          className="bg-blue-500 text-white px-4 py-2 rounded-xl shadow"
+        >
+          Create Wallet
+        </button>
+      ) : (
+        <div>
+          <div className="mb-4">
+            <p><strong>Wallet ID:</strong> {walletId}</p>
+            <p><strong>USD Balance:</strong> ${portfolio?.usd.toFixed(2)}</p>
+            <div>
+              <strong>Holdings:</strong>
+              <ul>
+                {portfolio && Object.entries(portfolio.holdings).length > 0 ? (
+                  Object.entries(portfolio.holdings).map(([key, val]) => (
+                    <li key={key}>
+                      {key}: {val.toFixed(6)} @ ${prices[key] ? prices[key].toFixed(2) : 'Loading...'}
+                    </li>
+                  ))
+                ) : (
+                  <li>No holdings yet.</li>
+                )}
+              </ul>
+            </div>
+            <p className="mt-2"><strong>Profit/Loss:</strong> {profit.toFixed(2)}%</p>
+          </div>
+          <div className="flex gap-2 mb-2">
+            <input
+              type="text"
+              value={coin}
+              onChange={(e) => setCoin(e.target.value)}
+              placeholder="Coin ID (e.g., bitcoin)"
+              className="border p-2 rounded w-1/2"
+            />
+            <input
+              type="number"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="Amount in USD"
+              className="border p-2 rounded w-1/2"
+            />
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => handleTransaction('buy')}
+              className="bg-green-500 text-white px-4 py-2 rounded-xl shadow disabled:opacity-50"
+              disabled={loading}
+            >
+              {loading ? 'Processing...' : 'Buy'}
+            </button>
+            <button
+              onClick={() => handleTransaction('sell')}
+              className="bg-red-500 text-white px-4 py-2 rounded-xl shadow disabled:opacity-50"
+              disabled={loading}
+            >
+              {loading ? 'Processing...' : 'Sell'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
